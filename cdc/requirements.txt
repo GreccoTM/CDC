@@ -1,3 +1,4 @@
 requests
 pyinstaller
 beautifulsoup4
+ijson

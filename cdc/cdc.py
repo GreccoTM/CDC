@@ -14,7 +14,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file_path, mode='a', encoding='utf-8'),
-        logging.StreamHandler()  # Mantém o logging no console também
+        # logging.StreamHandler()  # Logs visíveis apenas na GUI
     ],
     force=True
 )
@@ -26,8 +26,10 @@ class AppUI:
     """
     def __init__(self, root):
         self.root = root
+        self.stop_button = None # Initialize reference
         self._create_menu()
         self._create_widgets()
+
 
     def _create_menu(self):
         menubar = tk.Menu(self.root)
@@ -196,9 +198,12 @@ class AppUI:
         style.configure("Custom.Horizontal.TProgressbar", troughcolor="lightgray", background="steelblue")
         self.progress_bar = ttk.Progressbar(progress_total_frame, orient="horizontal", mode="determinate", style="Custom.Horizontal.TProgressbar")
         self.progress_bar.grid(row=0, column=0, sticky="ew", pady=2)
+        
+        self.stop_button = ttk.Button(progress_total_frame, text="Parar", state=tk.DISABLED)
+        self.stop_button.grid(row=0, column=1, padx=5)
 
         self.total_cost_label = ttk.Label(progress_total_frame, text="Custo Total Estimado: R$ 0.00", anchor=tk.E)
-        self.total_cost_label.grid(row=0, column=1, sticky="e", padx=5)
+        self.total_cost_label.grid(row=0, column=2, sticky="e", padx=5)
 
 
 class CommanderDeckCheckApp:
@@ -216,6 +221,7 @@ class CommanderDeckCheckApp:
         self.selected_commander = None
         self.edhrec_recommendations = []
         self.total_missing_cost = 0.0
+        self.stop_fetching_event = threading.Event()
 
         self.ui = AppUI(self.root)
         self._bind_events()
@@ -271,6 +277,15 @@ class CommanderDeckCheckApp:
         ttk.Button(self.ui.collection_buttons_frame, text="Identificar Comandantes", command=self._identify_commanders).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         ttk.Button(self.ui.collection_buttons_frame, text="Comparar", command=self._compare_with_collection).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         ttk.Button(self.ui.collection_buttons_frame, text="Ver Logs", command=self.ui._show_logs).pack(side=tk.RIGHT, padx=5)
+        
+        self.ui.stop_button.config(command=self._stop_comparison)
+
+    def _stop_comparison(self):
+        """ Sinaliza para parar a busca de preços. """
+        if not self.stop_fetching_event.is_set():
+            self.stop_fetching_event.set()
+            self._update_status("Parando consulta... Aguarde finalizar a requisição atual.")
+            self.ui.stop_button.config(state=tk.DISABLED)
 
     def _update_status(self, message):
         self.ui.status_label.config(text=message)
@@ -400,6 +415,8 @@ class CommanderDeckCheckApp:
             self.ui.comparison_results_text.insert(tk.END, "Aviso: Usando taxa de câmbio padrão (R$5.00/US$1.00).\n")
 
         self.ui.progress_bar["maximum"] = len(cards_you_need)
+        self.stop_fetching_event.clear()
+        self.ui.stop_button.config(state=tk.NORMAL)
         
         price_fetching_thread = threading.Thread(target=self._price_fetching_worker, args=(sorted(cards_you_need), usd_to_brl_rate))
         price_fetching_thread.start()
@@ -408,6 +425,10 @@ class CommanderDeckCheckApp:
     def _price_fetching_worker(self, cards_to_fetch, usd_to_brl_rate):
         total_cost = 0.0
         for i, card_name in enumerate(cards_to_fetch):
+            if self.stop_fetching_event.is_set():
+                self.queue.put(("stopped", None, None))
+                break
+                
             self.queue.put(("progress", i + 1, card_name))
             usd_price = mtg_data_manager.get_card_price_from_scryfall(card_name)
             
@@ -418,9 +439,10 @@ class CommanderDeckCheckApp:
                 display_price = f"R$ {brl_price:.2f}"
             
             self.queue.put(("card_price", card_name, display_price))
+            self.queue.put(("total_cost", total_cost, None))
             
-        self.queue.put(("total_cost", total_cost, None))
-        self.queue.put(("done", None, None))
+        if not self.stop_fetching_event.is_set():
+            self.queue.put(("done", None, None))
 
     def _process_queue(self):
         try:
@@ -437,6 +459,11 @@ class CommanderDeckCheckApp:
                 elif msg_type == "done":
                     self.ui.progress_bar["value"] = self.ui.progress_bar["maximum"]
                     self._update_status(f"Comparação completa. Custo total: R$ {self.total_missing_cost:.2f}.")
+                    self.ui.stop_button.config(state=tk.DISABLED)
+                    return
+                elif msg_type == "stopped":
+                    self._update_status(f"Comparação interrompida pelo usuário. Custo parcial: R$ {self.total_missing_cost:.2f}.")
+                    self.ui.stop_button.config(state=tk.DISABLED)
                     return
         except queue.Empty:
             self.root.after(100, self._process_queue)

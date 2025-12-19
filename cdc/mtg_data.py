@@ -8,6 +8,7 @@ import logging
 from collections import defaultdict
 import urllib.parse
 import unicodedata
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -42,6 +43,30 @@ class MTGDataManager:
             self.all_printings_path = all_printings_path
 
         self._all_cards_data = None  # Cache para os dados das cartas
+        
+        # Inicializa o cache de preços
+        self.price_cache_path = os.path.join(get_base_path(), "price_cache.json")
+        self.price_cache = {}
+        self._load_price_cache()
+
+    def _load_price_cache(self):
+        """ Carrega o cache de preços do arquivo JSON. """
+        try:
+            if os.path.exists(self.price_cache_path):
+                with open(self.price_cache_path, "r") as f:
+                    self.price_cache = json.load(f)
+                logging.info(f"Cache de preços carregado com {len(self.price_cache)} itens.")
+        except Exception as e:
+            logging.error(f"Erro ao carregar cache de preços: {e}")
+            self.price_cache = {}
+
+    def _save_price_cache(self):
+        """ Salva o cache de preços no arquivo JSON. """
+        try:
+            with open(self.price_cache_path, "w") as f:
+                json.dump(self.price_cache, f)
+        except Exception as e:
+            logging.error(f"Erro ao salvar cache de preços: {e}")
 
     def _load_all_printings(self):
         """
@@ -117,9 +142,15 @@ class MTGDataManager:
         """
         Busca recomendações do EDHREC para um dado comandante.
         """
+        # Trata cartas de dupla face (ex: "Aclazotz // Temple") usando apenas o nome da frente
+        if " // " in commander_name:
+            commander_name_clean = commander_name.split(" // ")[0]
+        else:
+            commander_name_clean = commander_name
+
         # Normaliza o nome: remove acentos e caracteres especiais para criar um slug
         # Ex: "Arwen Undómiel" -> "arwen-undomiel"
-        normalized_name = unicodedata.normalize('NFKD', commander_name).encode('ASCII', 'ignore').decode('ASCII')
+        normalized_name = unicodedata.normalize('NFKD', commander_name_clean).encode('ASCII', 'ignore').decode('ASCII')
         base_name = re.sub(r"[^\w\s-]", "", normalized_name.lower()).replace(" ", "-")
         
         # Codifica o nome para garantir que seja seguro para a URL (embora agora deva ser apenas ASCII)
@@ -158,11 +189,20 @@ class MTGDataManager:
             logging.error(f"Erro inesperado ao buscar recomendações do EDHREC: {e}")
         return None
 
-    @staticmethod
-    def get_card_price_from_scryfall(card_name):
+    def get_card_price_from_scryfall(self, card_name):
         """
-        Busca o preço em USD de uma carta no Scryfall de forma segura.
+        Busca o preço em USD de uma carta no Scryfall de forma segura, usando cache.
         """
+        current_time = time.time()
+        
+        # Verificar Cache
+        if card_name in self.price_cache:
+            cache_entry = self.price_cache[card_name]
+            # Validade de 12 horas (12 * 60 * 60 = 43200 segundos)
+            if current_time - cache_entry.get("timestamp", 0) < 43200:
+                logging.info(f"Preço de cache usado para '{card_name}': US${cache_entry['price']}")
+                return cache_entry['price']
+
         logging.info(f"Buscando preço no Scryfall para a carta: '{card_name}'")
         try:
             # Codifica o nome da carta para garantir que seja seguro para a URL
@@ -176,15 +216,21 @@ class MTGDataManager:
 
             # Extrai o preço de forma segura
             prices = card_data.get("prices", {})
-            price_str = prices.get("usd") or prices.get("usd_foil")
+            price_str = prices.get("usd") or prices.get("usd_foil") or prices.get("usd_etched")
             
             # Converte o preço para float, tratando o caso de ser None
             price = float(price_str) if price_str else None
             
+            # Atualizar Cache
             if price is not None:
                 logging.info(f"Preço encontrado para '{card_name}': US${price:.2f}")
+                self.price_cache[card_name] = {"price": price, "timestamp": current_time}
+                self._save_price_cache()
             else:
                 logging.warning(f"Preço não disponível no Scryfall para '{card_name}'.")
+                # Opcional: Cachear falhas por um tempo menor para evitar spam? 
+                # Por enquanto, não cacheamos falhas.
+                
             return price
 
         except requests.exceptions.RequestException as e:

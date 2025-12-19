@@ -26,7 +26,28 @@ class AppUI:
     """
     def __init__(self, root):
         self.root = root
+        self._create_menu()
         self._create_widgets()
+
+    def _create_menu(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Ajuda", menu=help_menu)
+        help_menu.add_command(label="Sobre", command=self._show_about)
+
+    def _show_about(self):
+        about_text = (
+            "Commander Deck Check (CDC)\n"
+            "Versão 1.0\n\n"
+            "Desenvolvido por: GreccoTM\n\n"
+            "Este projeto utiliza dados de:\n"
+            "- MTGJSON\n"
+            "- EDHREC\n"
+            "- Scryfall API"
+        )
+        messagebox.showinfo("Sobre", about_text)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self.root, padding="10")
@@ -202,14 +223,46 @@ class CommanderDeckCheckApp:
         self.ui.status_label.config(text="Pronto")
 
         # Carregamento inicial dos dados
-        self.load_initial_data()
+        self._start_loading_data()
 
-    def load_initial_data(self):
-        """ Carrega a base de dados de cartas e trata falhas. """
+    def _start_loading_data(self):
+        """ Inicia o carregamento dos dados em uma thread separada. """
+        self._update_status("Carregando base de dados de cartas... Por favor, aguarde.")
+        self._set_ui_state(tk.DISABLED)
+        loading_thread = threading.Thread(target=self._loading_worker)
+        loading_thread.start()
+        self.root.after(100, self._check_loading_queue)
+
+    def _loading_worker(self):
+        """ Worker para carregar os dados. """
         try:
             mtg_data_manager._load_all_printings()
+            self.queue.put(("loading_complete", None, None))
         except Exception as e:
-            self._handle_error("Falha crítica ao carregar a base de dados de cartas.", e, exit_on_ok=True)
+            self.queue.put(("loading_error", str(e), None))
+
+    def _check_loading_queue(self):
+        """ Verifica a fila de mensagens para o carregamento inicial. """
+        try:
+            while True:
+                msg_type, value1, _ = self.queue.get_nowait()
+                if msg_type == "loading_complete":
+                    self._update_status("Base de dados carregada. Pronto.")
+                    self._set_ui_state(tk.NORMAL)
+                    return
+                elif msg_type == "loading_error":
+                    self._handle_error("Falha crítica ao carregar base de dados.", value1, exit_on_ok=True)
+                    return
+        except queue.Empty:
+            self.root.after(100, self._check_loading_queue)
+
+    def _set_ui_state(self, state):
+        """ Habilita ou desabilita os botões de interação. """
+        for child in self.ui.collection_buttons_frame.winfo_children():
+            try:
+                child.config(state=state)
+            except tk.TclError:
+                pass
 
     def _bind_events(self):
         """ Vincula os eventos da UI aos métodos da aplicação. """

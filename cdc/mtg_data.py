@@ -7,6 +7,7 @@ import requests
 import logging
 from collections import defaultdict
 import urllib.parse
+import unicodedata
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -116,9 +117,12 @@ class MTGDataManager:
         """
         Busca recomendações do EDHREC para um dado comandante.
         """
-        # Limpa e formata o nome do comandante para a URL
-        base_name = re.sub(r"[^\w\s-]", "", commander_name.lower()).replace(" ", "-")
-        # Codifica o nome para garantir que seja seguro para a URL
+        # Normaliza o nome: remove acentos e caracteres especiais para criar um slug
+        # Ex: "Arwen Undómiel" -> "arwen-undomiel"
+        normalized_name = unicodedata.normalize('NFKD', commander_name).encode('ASCII', 'ignore').decode('ASCII')
+        base_name = re.sub(r"[^\w\s-]", "", normalized_name.lower()).replace(" ", "-")
+        
+        # Codifica o nome para garantir que seja seguro para a URL (embora agora deva ser apenas ASCII)
         formatted_name = urllib.parse.quote(base_name)
         
         edhrec_url = f"https://json.edhrec.com/pages/commanders/{formatted_name}.json"

@@ -3,3 +3,6 @@ cdc/build/
 cdc/dist/
 
 GEMINI.md
+
+*.log
+cdc/cdc.log

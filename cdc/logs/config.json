@@ -1,0 +1,4 @@
+{
+  "price_cache_hours": 24,
+  "exchange_rate_cache_minutes": 15
+}

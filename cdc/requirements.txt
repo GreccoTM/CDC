@@ -2,3 +2,6 @@ requests
 pyinstaller
 beautifulsoup4
 ijson
+selenium
+pillow
+webdriver-manager

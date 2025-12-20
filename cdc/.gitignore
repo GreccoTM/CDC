@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Logs and Cache
+logs/cdc.log
+logs/ligamagic_cache.json
+logs/price_cache.json
+*.log
+
+# Build
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+launch_log.txt
+cartas_magic.txt
+test_*.py
+test_*.txt
+
+# User data
+*.deck
+*.collection
